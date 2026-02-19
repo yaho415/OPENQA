@@ -1,0 +1,18 @@
+# Web Framework
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# Database
+psycopg2-binary==2.9.10
+
+# HTTP Client (Ollama API 호출 - async + 연결 재사용)
+httpx==0.28.1
+
+# Environment Variables
+python-dotenv==1.0.1
+
+# OpenAI compatible client (Qwen LLM, 선택적)
+openai==1.58.1
+
+# Pydantic (FastAPI 의존성)
+pydantic==2.10.4
