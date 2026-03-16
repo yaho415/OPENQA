@@ -13,7 +13,10 @@ body {
   background: linear-gradient(135deg, #acfdf9 0%, #f6fafc 25%, #ece2f9 85%, #a26afc 100%);
   background-attachment: fixed;
   min-height: 100vh;
-  padding: 20px;
+}
+
+#root {
+  height: 100vh;
 }
 
 code {

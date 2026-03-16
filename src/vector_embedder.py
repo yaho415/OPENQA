@@ -228,36 +228,42 @@ class VectorEmbedder:
         return embeddings
 
     @staticmethod
-    def create_embedding_text(case_item) -> str:
+    def create_embedding_text(project_item) -> str:
         """
-        사례 데이터를 임베딩하기 위한 텍스트 생성
+        프로젝트 데이터를 임베딩하기 위한 텍스트 생성
+
+        임베딩 대상 컬럼:
+          project_name, sales_dept_code, contract_account,
+          industry_detail, business_type, summary, methodology_value
 
         Args:
-            case_item: Case 객체 또는 유사한 속성을 가진 딕셔너리
+            project_item: Project 객체 또는 유사한 속성을 가진 딕셔너리
 
         Returns:
             임베딩용 텍스트
         """
-        if hasattr(case_item, "project_name"):
+        if hasattr(project_item, "project_name"):
             parts = [
-                case_item.project_name,
-                case_item.business_overview,
-                case_item.department,
-                case_item.industry,
-                *case_item.keywords,
-                *(case_item.tags or []),
+                project_item.project_name,
+                getattr(project_item, "sales_dept_code", None) or "",
+                getattr(project_item, "contract_account", None) or "",
+                getattr(project_item, "industry_detail", None) or "",
+                getattr(project_item, "business_type", None) or "",
+                getattr(project_item, "summary", None) or "",
+                getattr(project_item, "methodology_value", None) or "",
             ]
         else:
             parts = [
-                case_item.get("project_name", ""),
-                case_item.get("business_overview", ""),
-                case_item.get("department", ""),
-                case_item.get("industry", ""),
-                *case_item.get("keywords", []),
-                *case_item.get("tags", []),
+                project_item.get("project_name", ""),
+                project_item.get("sales_dept_code", ""),
+                project_item.get("contract_account", ""),
+                project_item.get("industry_detail", ""),
+                project_item.get("business_type", ""),
+                project_item.get("summary", ""),
+                project_item.get("methodology_value", ""),
             ]
 
-        return " ".join(p for p in parts if p and p.strip())
+        return " ".join(p.strip() for p in parts if p and p.strip())
 
     def get_dimension(self) -> int:
         """임베딩 차원 반환"""

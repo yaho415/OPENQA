@@ -12,7 +12,7 @@ from psycopg2 import pool
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
-from src.types.case import Case
+from src.types.case import Project
 
 load_dotenv()
 
@@ -80,25 +80,30 @@ class DatabaseManager:
         return """
         CREATE EXTENSION IF NOT EXISTS vector;
 
-        CREATE TABLE IF NOT EXISTS cases (
-            id VARCHAR(50) PRIMARY KEY,
-            project_name TEXT NOT NULL,
-            grade VARCHAR(1) NOT NULL CHECK(grade IN ('A', 'B', 'C')),
-            department TEXT NOT NULL,
-            industry TEXT NOT NULL,
-            business_overview TEXT NOT NULL,
-            keywords JSONB NOT NULL,
-            category TEXT,
-            tags JSONB,
-            embedding vector(1024),
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS project (
+            project_code        VARCHAR(400)    PRIMARY KEY,
+            project_name        VARCHAR(200)    NOT NULL,
+            grade_code          VARCHAR(10),
+            sap_phase           VARCHAR(20)     CHECK(sap_phase IN ('S', 'A', 'B', 'C')),
+            sales_dept_code     VARCHAR(100),
+            project_from_date   DATE,
+            contract_account    VARCHAR(400),
+            industry_detail     VARCHAR(30),
+            business_type       VARCHAR(30)     CHECK(business_type IN ('유지보수', '신규', '지원')),
+            summary             VARCHAR(400),
+            methodology_value   VARCHAR(30),
+            embedding           vector(1024),
+            created_at          TIMESTAMP       DEFAULT CURRENT_TIMESTAMP,
+            updated_at          TIMESTAMP       DEFAULT CURRENT_TIMESTAMP
         );
 
-        CREATE INDEX IF NOT EXISTS idx_industry ON cases(industry);
-        CREATE INDEX IF NOT EXISTS idx_grade ON cases(grade);
-        CREATE INDEX IF NOT EXISTS idx_department ON cases(department);
-        CREATE INDEX IF NOT EXISTS idx_project_name ON cases(project_name);
+        CREATE INDEX IF NOT EXISTS idx_project_grade_code       ON project(grade_code);
+        CREATE INDEX IF NOT EXISTS idx_project_sap_phase        ON project(sap_phase);
+        CREATE INDEX IF NOT EXISTS idx_project_sales_dept_code  ON project(sales_dept_code);
+        CREATE INDEX IF NOT EXISTS idx_project_industry_detail  ON project(industry_detail);
+        CREATE INDEX IF NOT EXISTS idx_project_business_type    ON project(business_type);
+        CREATE INDEX IF NOT EXISTS idx_project_contract_account ON project(contract_account);
+        CREATE INDEX IF NOT EXISTS idx_project_name             ON project(project_name);
 
         CREATE OR REPLACE FUNCTION update_updated_at_column()
         RETURNS TRIGGER AS $$
@@ -108,121 +113,122 @@ class DatabaseManager:
         END;
         $$ language 'plpgsql';
 
-        DROP TRIGGER IF EXISTS update_cases_updated_at ON cases;
-        CREATE TRIGGER update_cases_updated_at
-            BEFORE UPDATE ON cases
+        DROP TRIGGER IF EXISTS update_project_updated_at ON project;
+        CREATE TRIGGER update_project_updated_at
+            BEFORE UPDATE ON project
             FOR EACH ROW
             EXECUTE FUNCTION update_updated_at_column();
         """
 
     @staticmethod
-    def _row_to_case(row: dict) -> Case:
-        """데이터베이스 행을 Case 객체로 변환"""
-        keywords = row.get("keywords", [])
-        if isinstance(keywords, str):
-            keywords = json.loads(keywords)
-
-        tags = row.get("tags")
-        if isinstance(tags, str):
-            tags = json.loads(tags)
-
-        return Case(
-            id=row["id"],
+    def _row_to_project(row: dict) -> Project:
+        """데이터베이스 행을 Project 객체로 변환"""
+        return Project(
+            project_code=row["project_code"],
             project_name=row["project_name"],
-            grade=row["grade"],
-            department=row["department"],
-            industry=row["industry"],
-            business_overview=row["business_overview"],
-            keywords=keywords if isinstance(keywords, list) else [],
-            category=row.get("category") or None,
-            tags=tags if isinstance(tags, list) else None,
+            grade_code=row.get("grade_code"),
+            sap_phase=row.get("sap_phase"),
+            sales_dept_code=row.get("sales_dept_code"),
+            project_from_date=str(row["project_from_date"]) if row.get("project_from_date") else None,
+            contract_account=row.get("contract_account"),
+            industry_detail=row.get("industry_detail"),
+            business_type=row.get("business_type"),
+            summary=row.get("summary"),
+            methodology_value=row.get("methodology_value"),
         )
 
     # ──────────────────────────────────────────────────────────
     # CRUD 연산
     # ──────────────────────────────────────────────────────────
 
-    def get_all_cases(self) -> List[Case]:
-        """모든 사례 조회"""
+    def get_all_projects(self) -> List[Project]:
+        """모든 프로젝트 조회"""
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM cases ORDER BY created_at DESC")
+                cur.execute("SELECT * FROM project ORDER BY created_at DESC")
                 rows = cur.fetchall()
-            return [self._row_to_case(row) for row in rows]
+            return [self._row_to_project(row) for row in rows]
         finally:
             self._put_conn(conn)
 
-    def get_case_by_id(self, case_id: str) -> Optional[Case]:
-        """ID로 사례 조회"""
+    def get_project_by_code(self, project_code: str) -> Optional[Project]:
+        """프로젝트 코드로 조회"""
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
+                cur.execute("SELECT * FROM project WHERE project_code = %s", (project_code,))
                 row = cur.fetchone()
-            return self._row_to_case(row) if row else None
+            return self._row_to_project(row) if row else None
         finally:
             self._put_conn(conn)
 
-    def insert_case(self, case_item: Case) -> None:
-        """사례 추가"""
+    def insert_project(self, item: Project) -> None:
+        """프로젝트 추가"""
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """INSERT INTO cases (
-                        id, project_name, grade, department, industry,
-                        business_overview, keywords, category, tags
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    """INSERT INTO project (
+                        project_code, project_name, grade_code, sap_phase,
+                        sales_dept_code, project_from_date, contract_account,
+                        industry_detail, business_type, summary, methodology_value
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     (
-                        case_item.id,
-                        case_item.project_name,
-                        case_item.grade,
-                        case_item.department,
-                        case_item.industry,
-                        case_item.business_overview,
-                        json.dumps(case_item.keywords, ensure_ascii=False),
-                        case_item.category,
-                        json.dumps(case_item.tags, ensure_ascii=False) if case_item.tags else None,
+                        item.project_code,
+                        item.project_name,
+                        item.grade_code,
+                        item.sap_phase,
+                        item.sales_dept_code,
+                        item.project_from_date,
+                        item.contract_account,
+                        item.industry_detail,
+                        item.business_type,
+                        item.summary,
+                        item.methodology_value,
                     ),
                 )
             conn.commit()
         finally:
             self._put_conn(conn)
 
-    def update_case(self, case_item: Case) -> None:
-        """사례 업데이트"""
+    def update_project(self, item: Project) -> None:
+        """프로젝트 업데이트 (updated_at 자동 갱신)"""
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """UPDATE cases SET
-                        project_name = %s, grade = %s, department = %s,
-                        industry = %s, business_overview = %s,
-                        keywords = %s, category = %s, tags = %s
-                    WHERE id = %s""",
+                    """UPDATE project SET
+                        project_name = %s, grade_code = %s, sap_phase = %s,
+                        sales_dept_code = %s, project_from_date = %s,
+                        contract_account = %s, industry_detail = %s,
+                        business_type = %s, summary = %s, methodology_value = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project_code = %s""",
                     (
-                        case_item.project_name,
-                        case_item.grade,
-                        case_item.department,
-                        case_item.industry,
-                        case_item.business_overview,
-                        json.dumps(case_item.keywords, ensure_ascii=False),
-                        case_item.category,
-                        json.dumps(case_item.tags, ensure_ascii=False) if case_item.tags else None,
-                        case_item.id,
+                        item.project_name,
+                        item.grade_code,
+                        item.sap_phase,
+                        item.sales_dept_code,
+                        item.project_from_date,
+                        item.contract_account,
+                        item.industry_detail,
+                        item.business_type,
+                        item.summary,
+                        item.methodology_value,
+                        item.project_code,
                     ),
                 )
             conn.commit()
         finally:
             self._put_conn(conn)
 
-    def delete_case(self, case_id: str) -> None:
-        """사례 삭제"""
+    def delete_project(self, project_code: str) -> None:
+        """프로젝트 삭제"""
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
-                cur.execute("DELETE FROM cases WHERE id = %s", (case_id,))
+                cur.execute("DELETE FROM project WHERE project_code = %s", (project_code,))
             conn.commit()
         finally:
             self._put_conn(conn)
@@ -231,66 +237,53 @@ class DatabaseManager:
     # 필터링 조회
     # ──────────────────────────────────────────────────────────
 
-    def get_cases_by_industry(self, industry: str) -> List[Case]:
-        """업종별 사례 조회"""
+    def get_projects_by_industry(self, industry: str) -> List[Project]:
+        """업종별 프로젝트 조회"""
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT * FROM cases WHERE industry = %s ORDER BY created_at DESC",
+                    "SELECT * FROM project WHERE industry_detail = %s ORDER BY created_at DESC",
                     (industry,),
                 )
                 rows = cur.fetchall()
-            return [self._row_to_case(row) for row in rows]
+            return [self._row_to_project(row) for row in rows]
         finally:
             self._put_conn(conn)
 
-    def get_cases_by_department(self, department: str) -> List[Case]:
-        """부서별 사례 조회"""
+    def get_projects_by_grade(self, grade: str) -> List[Project]:
+        """등급별 프로젝트 조회"""
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT * FROM cases WHERE department = %s ORDER BY created_at DESC",
-                    (department,),
-                )
-                rows = cur.fetchall()
-            return [self._row_to_case(row) for row in rows]
-        finally:
-            self._put_conn(conn)
-
-    def get_cases_by_grade(self, grade: str) -> List[Case]:
-        """등급별 사례 조회"""
-        conn = self._get_conn()
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT * FROM cases WHERE grade = %s ORDER BY created_at DESC",
+                    "SELECT * FROM project WHERE grade_code = %s ORDER BY created_at DESC",
                     (grade,),
                 )
                 rows = cur.fetchall()
-            return [self._row_to_case(row) for row in rows]
+            return [self._row_to_project(row) for row in rows]
         finally:
             self._put_conn(conn)
 
-    def search_cases_by_keyword(self, keyword: str) -> List[Case]:
-        """키워드로 사례 검색"""
+    def search_projects_by_keyword(self, keyword: str) -> List[Project]:
+        """키워드로 프로젝트 검색"""
         search_term = f"%{keyword.lower()}%"
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    """SELECT * FROM cases
+                    """SELECT * FROM project
                     WHERE LOWER(project_name) LIKE %s
-                       OR LOWER(business_overview) LIKE %s
-                       OR LOWER(department) LIKE %s
-                       OR LOWER(industry) LIKE %s
-                       OR LOWER(keywords::text) LIKE %s
+                       OR LOWER(COALESCE(summary, '')) LIKE %s
+                       OR LOWER(COALESCE(sales_dept_code, '')) LIKE %s
+                       OR LOWER(COALESCE(industry_detail, '')) LIKE %s
+                       OR LOWER(COALESCE(contract_account, '')) LIKE %s
+                       OR LOWER(COALESCE(business_type, '')) LIKE %s
                     ORDER BY created_at DESC""",
-                    (search_term, search_term, search_term, search_term, search_term),
+                    (search_term, search_term, search_term, search_term, search_term, search_term),
                 )
                 rows = cur.fetchall()
-            return [self._row_to_case(row) for row in rows]
+            return [self._row_to_project(row) for row in rows]
         finally:
             self._put_conn(conn)
 
@@ -308,7 +301,7 @@ class DatabaseManager:
                         COUNT(*) as total,
                         COUNT(embedding) as with_embedding,
                         COUNT(*) - COUNT(embedding) as without_embedding
-                    FROM cases
+                    FROM project
                 """)
                 row = cur.fetchone()
             return {
@@ -319,39 +312,39 @@ class DatabaseManager:
         finally:
             self._put_conn(conn)
 
-    def get_cases_without_embedding(self) -> List[Case]:
-        """임베딩이 없는 사례 가져오기"""
+    def get_projects_without_embedding(self) -> List[Project]:
+        """임베딩이 없는 프로젝트 가져오기"""
         conn = self._get_conn()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT * FROM cases WHERE embedding IS NULL ORDER BY created_at DESC"
+                    "SELECT * FROM project WHERE embedding IS NULL ORDER BY created_at DESC"
                 )
                 rows = cur.fetchall()
-            return [self._row_to_case(row) for row in rows]
+            return [self._row_to_project(row) for row in rows]
         finally:
             self._put_conn(conn)
 
-    def update_case_embedding(self, case_id: str, embedding: List[float]) -> None:
-        """사례에 임베딩 업데이트"""
+    def update_project_embedding(self, project_code: str, embedding: List[float]) -> None:
+        """프로젝트에 임베딩 업데이트"""
         embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
         conn = self._get_conn()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "UPDATE cases SET embedding = %s::vector WHERE id = %s",
-                    (embedding_str, case_id),
+                    "UPDATE project SET embedding = %s::vector WHERE project_code = %s",
+                    (embedding_str, project_code),
                 )
             conn.commit()
         finally:
             self._put_conn(conn)
 
-    def search_similar_cases_by_vector(
+    def search_similar_projects_by_vector(
         self,
         query_embedding: List[float],
         limit: int = 5,
         threshold: Optional[float] = None,
-    ) -> List[Tuple[Case, float]]:
+    ) -> List[Tuple[Project, float]]:
         """
         벡터 유사도 검색 (코사인 유사도 사용)
 
@@ -361,16 +354,17 @@ class DatabaseManager:
             threshold: 최소 유사도 임계값 (0-1, 선택적)
 
         Returns:
-            (Case, similarity) 튜플 리스트
+            (Project, similarity) 튜플 리스트
         """
         embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
         query = """
             SELECT
-                id, project_name, grade, department, industry,
-                business_overview, keywords, category, tags,
+                project_code, project_name, grade_code, sap_phase,
+                sales_dept_code, project_from_date, contract_account,
+                industry_detail, business_type, summary, methodology_value,
                 1 - (embedding <=> %s::vector) / 2.0 as similarity
-            FROM cases
+            FROM project
             WHERE embedding IS NOT NULL
         """
         params: list = [embedding_str]
@@ -388,11 +382,44 @@ class DatabaseManager:
                 cur.execute(query, params)
                 rows = cur.fetchall()
             return [
-                (self._row_to_case(row), float(row["similarity"]))
+                (self._row_to_project(row), float(row["similarity"]))
                 for row in rows
             ]
         finally:
             self._put_conn(conn)
+
+    # ──────────────────────────────────────────────────────────
+    # 하위 호환 메서드 (기존 코드 호환)
+    # ──────────────────────────────────────────────────────────
+
+    def get_all_cases(self) -> List[Project]:
+        return self.get_all_projects()
+
+    def get_case_by_id(self, case_id: str) -> Optional[Project]:
+        return self.get_project_by_code(case_id)
+
+    def insert_case(self, item: Project) -> None:
+        return self.insert_project(item)
+
+    def update_case(self, item: Project) -> None:
+        return self.update_project(item)
+
+    def update_case_embedding(self, case_id: str, embedding: List[float]) -> None:
+        return self.update_project_embedding(case_id, embedding)
+
+    def search_similar_cases_by_vector(
+        self, query_embedding: List[float], limit: int = 5, threshold: Optional[float] = None
+    ) -> List[Tuple[Project, float]]:
+        return self.search_similar_projects_by_vector(query_embedding, limit, threshold)
+
+    def search_cases_by_keyword(self, keyword: str) -> List[Project]:
+        return self.search_projects_by_keyword(keyword)
+
+    def get_cases_by_industry(self, industry: str) -> List[Project]:
+        return self.get_projects_by_industry(industry)
+
+    def get_cases_by_grade(self, grade: str) -> List[Project]:
+        return self.get_projects_by_grade(grade)
 
     # ──────────────────────────────────────────────────────────
     # 연결 관리
